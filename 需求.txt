@@ -1,6 +1,0 @@
-streamlit
-langchain-openai
-langchain-ollama
-pypdf
-python-docx
-requests
