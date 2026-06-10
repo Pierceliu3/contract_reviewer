@@ -74,7 +74,7 @@ def smart_compare(front_val, table_val, field_name):
     if front_val == "未找到" or table_val == "未找到":
         return False, front_val, table_val, "缺失数据"
     
-    exact_fields = ["提交地点", "采购项目名称", "项目地点"]
+    exact_fields = ["提交地点","采购项目名称"]
     if field_name in exact_fields:
         front_clean = front_val.strip()
         table_clean = table_val.strip()
@@ -226,6 +226,12 @@ def smart_compare(front_val, table_val, field_name):
 # 解析前部信息（公告）
 # ============================================
 def parse_front_info(text):
+    start_marker = "询价公告"
+    end_marker = "目录"
+    start_pos = text.find(start_marker)
+    end_pos = text.find(end_marker, start_pos) if start_pos != -1 else -1
+    if start_pos != -1 and end_pos != -1:
+        text = text[start_pos:end_pos]
     info = {}
     # 采购项目名称（优先找“采购项目名称”，找不到则找“工程名称”）
     match = re.search(r'采购项目名称[：:]\s*([^\n]+)', text)
@@ -235,7 +241,7 @@ def parse_front_info(text):
         match = re.search(r'工程名称[：:]\s*([^\n]+)', text)
         info["采购项目名称"] = match.group(1).strip() if match else "未找到"
     
-        # 发文时间：优先取“采购文件发布时间”，没有则取“公告发布时间”
+    # 发文时间：优先取“采购文件发布时间”，没有则取“公告发布时间”
     match = re.search(r'采购文件发布时间[：:]\s*([^\n]+)', text)
     if match:
         raw_date = match.group(1).strip()
@@ -252,13 +258,13 @@ def parse_front_info(text):
     match = re.search(r'项目地点[：:]\s*([^\n]+)', text) or re.search(r'建设地点[：:]\s*([^\n]+)', text)
     info["项目地点"] = match.group(1).strip() if match else "未找到"
     
-    # 建设规模
-        # 建设规模：同时匹配“建筑面积”或“总建筑面积”
+    # 建设规模：同时匹配“建筑面积”或“总建筑面积”
+        # 建设规模：匹配“建筑面积”、“总建筑面积”或“总面积”
     pattern = r'采购项目概况[：:]\s*(.*?)(?=\n\s*\n|采购范围|$)'
     match = re.search(pattern, text, re.DOTALL)
     if match:
         overview = match.group(1)
-        size_match = re.search(r'(?:总)?建筑面积[^0-9]*(\d+(?:\.\d+)?)\s*([^\d\s]{1,5})', overview)
+        size_match = re.search(r'(?:(?:总)?建筑面积|总面积)[^0-9]*(\d+(?:\.\d+)?)\s*([^\d\s]{1,5})', overview)
         if size_match:
             num = size_match.group(1)
             unit = size_match.group(2).strip()
@@ -267,7 +273,7 @@ def parse_front_info(text):
         else:
             info["建设规模"] = "未找到"
     else:
-        size_match = re.search(r'(?:总)?建筑面积[^0-9]*(\d+(?:\.\d+)?)\s*([^\d\s]{1,5})', text)
+        size_match = re.search(r'(?:(?:总)?建筑面积|总面积)[^0-9]*(\d+(?:\.\d+)?)\s*([^\d\s]{1,5})', text)
         if size_match:
             num = size_match.group(1)
             unit = size_match.group(2).strip()
@@ -281,8 +287,12 @@ def parse_front_info(text):
     info["报价方式"] = match.group(1).strip() if match else "未找到"
     
     # 质量要求
-    match = re.search(r'质量要求[：:]\s*([^\n]+)', text) or re.search(r'质量标准[：:]\s*([^\n]+)', text)
-    info["质量要求"] = match.group(1).strip() if match else "未找到"
+        # 质量要求：匹配“质量、技术要求”、“质量要求”或“质量标准”等，跨行提取到下一个标题
+    match = re.search(r'(?:质量[、，]技术|质量要求|质量标准)[：:]\s*(.*?)(?=\n[^\n]*[：:]|\Z)', text, re.DOTALL)
+    if match:
+        info["质量要求"] = match.group(1).strip().replace('\n', ' ')[:500]
+    else:
+        info["质量要求"] = "未找到"
     
     # 安全文明施工要求
     match = re.search(r'安全文明施工要求[：:]\s*([^\n]+)', text)
@@ -571,10 +581,6 @@ def split_composite_field(value):
             result['截止时间'] = m.group(1).strip()
     return result
 
-
-
-    
-    return info
 # ============================================
 # 比对映射（公告 vs 须知表）
 # ============================================
@@ -634,104 +640,6 @@ def compare_with_rules(front_info, table_dict):
         })
     return results
 
-def compare_three_sources(front_info, contract_info, table_dict):
-    """
-    三方比对：公告、须知表、合同
-    顺序：公告 -> 须知 -> 合同
-    如果合同中没有对应字段，则显示“合同协议书无此内容”
-    """
-    mapping = [
-        ("采购项目名称", "工程名称", "分包工程名称"),
-        ("项目地点", "建设地点", "分包工程地点"),
-        ("建设规模", "建设规模", None),          # 合同通常没有
-        ("质量要求", "质量标准", "工程质量标准"),
-        ("采购范围", "采购范围", "分包工程承包范围"),
-        ("计划工期", "工期要求", "合同工期总日历天数"),
-        ("分供商资格要求", "响应人资格要求", None),
-        ("报价及单价总价计价方式", "报价以及单价和总价计算方式", None),
-        ("提交地点", "提交地点", None),
-        ("截止时间", "截止时间", None),
-        ("收件联系人", "收件联系人", "合同收件联系人"),
-    ]
-    results = []
-
-    def extract_days(text):
-        """从文本中提取天数（如“90天”），返回标准化字符串"""
-        if text == "未找到":
-            return "未找到"
-        match = re.search(r'(\d+)\s*天', text)
-        return match.group(1) + "天" if match else "未找到"
-
-    for front_key, table_key, contract_key in mapping:
-        front_val = front_info.get(front_key, "未找到")
-        
-        # 须知表值
-        table_val = None
-        for tk, tv in table_dict.items():
-            if tk == table_key or table_key in tk:
-                table_val = tv
-                break
-        if table_val is None:
-            table_val = "未找到"
-        
-        # 合同值
-        if contract_key and contract_info and contract_key in contract_info:
-            contract_val = contract_info.get(contract_key, "未找到")
-        else:
-            contract_val = "合同协议书无此内容"  # 合同缺失时显示友好提示
-
-        # 特殊处理工期：提取天数
-        if front_key == "计划工期":
-            front_val = extract_days(front_val)
-            table_val = extract_days(table_val)
-            if contract_val != "合同协议书无此内容":
-                contract_val = extract_days(contract_val)
-        # 特殊处理收件联系人：合同已经组合好，直接使用
-        elif front_key == "收件联系人":
-            pass  # 无需额外处理
-
-        # 使用 smart_compare 进行两两比较
-        def safe_compare(a, b):
-            if a == "未找到" or b == "未找到" or a == "合同协议书无此内容" or b == "合同协议书无此内容":
-                return False
-            return smart_compare(a, b, front_key)[0]
-
-        front_table = safe_compare(front_val, table_val)
-        front_contract = safe_compare(front_val, contract_val)
-        table_contract = safe_compare(table_val, contract_val)
-
-        # 综合判断一致性
-        present = [v for v in [front_val, table_val, contract_val] if v not in ["未找到", "合同协议书无此内容"]]
-        if len(present) == 3:
-            all_match = front_table and front_contract and table_contract
-            basis = "三方一致"
-        elif len(present) == 2:
-            # 判断哪两个存在
-            if front_val not in ["未找到", "合同协议书无此内容"] and table_val not in ["未找到", "合同协议书无此内容"]:
-                all_match = front_table
-                basis = "公告 vs 须知"
-            elif front_val not in ["未找到", "合同协议书无此内容"] and contract_val not in ["未找到", "合同协议书无此内容"]:
-                all_match = front_contract
-                basis = "公告 vs 合同"
-            else:
-                all_match = table_contract
-                basis = "须知 vs 合同"
-        elif len(present) == 1:
-            all_match = False
-            basis = "仅一个来源有数据"
-        else:
-            all_match = False
-            basis = "所有来源均缺失"
-
-        status = "✅ 一致" if all_match else "❌ 不一致"
-        # 按照 公告 -> 须知 -> 合同 的顺序显示
-        display = f"公告: {front_val}\n须知: {table_val}\n合同: {contract_val}\n比较依据: {basis}"
-        results.append({
-            "项目": front_key,
-            "状态": status,
-            "显示值": display
-        })
-    return results
 # ============================================
 # 内容合理性检查
 # ============================================
@@ -885,7 +793,7 @@ def check_internal_rules(front_info, table_dict):
             "详情": f"缺少必要字段：{', '.join(missing)}"
         })
     
-        # ---------- 规则：截止时间格式完整性检查 ----------
+    # 规则：截止时间格式完整性检查
     deadline_front = front_info.get("截止时间", "")
     deadline_table = table_dict.get("截止时间", "")
     errors = []
@@ -1010,49 +918,46 @@ def check_internal_rules(front_info, table_dict):
 # 负面清单检查
 # ============================================
 def check_negative_list(front_info, table_dict):
-    """
-    负面清单检查：
-    1. 履约担保比例（从 table_dict 中获取）
-    2. 资格要求禁止性条款（全文扫描，收集所有违规，并在原文中高亮违禁词）
-    """
     issues = []
-    
-    # ---------- 1. 履约担保比例 ----------
-    guarantee_text = table_dict.get("履约担保", "")
-    if guarantee_text and guarantee_text != "未找到":
-        match = re.search(r'(\d+(?:\.\d+)?)\s*%', guarantee_text)
-        if match:
-            percent = float(match.group(1))
-            if percent >= 10:
-                issues.append({
-                    "规则": "履约担保比例",
-                    "通过": True,
-                    "原文": guarantee_text,
-                    "详情": f"当前比例 {percent}%，符合 ≥10% 的要求"
-                })
+    skip_table = (table_dict == {})
+
+    # ---------- 1. 履约担保比例（仅在未跳过表格时检查）----------
+    if not skip_table:
+        guarantee_text = table_dict.get("履约担保", "")
+        if guarantee_text and guarantee_text != "未找到":
+            match = re.search(r'(\d+(?:\.\d+)?)\s*%', guarantee_text)
+            if match:
+                percent = float(match.group(1))
+                if percent >= 10:
+                    issues.append({
+                        "规则": "履约担保比例",
+                        "通过": True,
+                        "原文": guarantee_text,
+                        "详情": f"当前比例 {percent}%，符合 ≥10% 的要求"
+                    })
+                else:
+                    issues.append({
+                        "规则": "履约担保比例",
+                        "通过": False,
+                        "原文": guarantee_text,
+                        "详情": f"当前比例 {percent}%，小于 10%，不符合要求"
+                    })
             else:
                 issues.append({
                     "规则": "履约担保比例",
                     "通过": False,
                     "原文": guarantee_text,
-                    "详情": f"当前比例 {percent}%，小于 10%，不符合要求"
+                    "详情": "未在履约担保条款中找到明确的百分比数值"
                 })
         else:
             issues.append({
                 "规则": "履约担保比例",
                 "通过": False,
-                "原文": guarantee_text,
-                "详情": "未在履约担保条款中找到明确的百分比数值"
+                "原文": "未找到",
+                "详情": "未找到履约担保条款"
             })
-    else:
-        issues.append({
-            "规则": "履约担保比例",
-            "通过": False,
-            "原文": "未找到",
-            "详情": "未找到履约担保条款"
-        })
-    
-    # ---------- 2. 资格要求禁止性条款（全文扫描）----------
+
+    # ---------- 2. 资格要求禁止性条款（全文扫描，始终执行）----------
     flexible_rules = [
         {
             "groups": [
@@ -1060,6 +965,7 @@ def check_negative_list(front_info, table_dict):
                 r'必须|须|应当|要求包含|限定',
                 r'制作|销售|产品|服务'
             ],
+            "min_matches": 3,
             "desc": "限定营业执照经营范围（如要求涵盖特定产品）",
             "keywords": ['营业执照', '经营范围', '必须', '须', '应当', '要求包含', '限定', '制作', '销售', '产品', '服务']
         },
@@ -1090,22 +996,19 @@ def check_negative_list(front_info, table_dict):
             "desc": "要求投标人注册资本金（强制性表述）",
             "keywords": ['注册资本金', '注册资本', '注册资金', '必须', '须', '至少', '不低于']
         },
-                   {
+        {
             "groups": [
                 r'(?:必须|须|应当|要求|仅限于|限定)\s*(?:在)?\s*(?:本地|当地|本市|本省|本区|注册地)',
                 r'投标人.*?(?:本地|当地|本市|本省|本区|注册地)',
-                r'在\s*[\u4e00-\u9fff]{2,6}\s*(?:省|市|区)',
                 r'注册地\s*(?:必须|须|应当|要求)'
             ],
             "min_matches": 1,
             "desc": "存在地域限制或注册地要求（可能排斥其他地区潜在投标人）",
-             "keywords": ['必须在','须在','本地', '当地', '本市', '本省', '本区', '注册地', '省', '市', '区']
-       
+            "keywords": ['必须在','须在','本地', '当地', '本市', '本省', '本区', '注册地']
         },
     ]
     
     def collect_all_violations(text):
-        """返回列表，每个元素为 (desc, snippet, keywords)"""
         if not text:
             return []
         sentences = re.split(r'[。！；\n]+', text)
@@ -1114,24 +1017,14 @@ def check_negative_list(front_info, table_dict):
             desc = rule["desc"]
             groups = rule["groups"]
             keywords = rule.get("keywords", [])
-            if desc == "限定营业执照经营范围（如要求涵盖特定产品）":
-                for sentence in sentences:
-                    has_group0 = bool(re.search(groups[0], sentence, re.IGNORECASE))
-                    if not has_group0:
-                        continue
-                    has_group1 = bool(re.search(groups[1], sentence, re.IGNORECASE))
-                    has_group2 = bool(re.search(groups[2], sentence, re.IGNORECASE))
-                    if has_group1 or has_group2:
-                        violations.append((desc, sentence[:200], keywords))
-            else:
-                min_matches = rule.get("min_matches", len(groups))
-                for sentence in sentences:
-                    matched_count = 0
-                    for pattern in groups:
-                        if re.search(pattern, sentence, re.IGNORECASE):
-                            matched_count += 1
-                    if matched_count >= min_matches:
-                        violations.append((desc, sentence[:200], keywords))
+            min_matches = rule.get("min_matches", len(groups))
+            for sentence in sentences:
+                matched_count = 0
+                for pattern in groups:
+                    if re.search(pattern, sentence, re.IGNORECASE):
+                        matched_count += 1
+                if matched_count >= min_matches:
+                    violations.append((desc, sentence[:200], keywords))
         return violations
     
     full_text = st.session_state.get("full_text", "")
@@ -1149,7 +1042,6 @@ def check_negative_list(front_info, table_dict):
             full_original = []
             for idx, (desc, snippet, keywords) in enumerate(violations_list, 1):
                 details.append(f"{idx}. {desc}")
-                # 高亮关键词
                 highlighted = snippet
                 for kw in keywords:
                     pattern = re.compile(r'(' + re.escape(kw) + r')', re.IGNORECASE)
@@ -1169,17 +1061,12 @@ def check_negative_list(front_info, table_dict):
                 "详情": "未发现禁止性条款"
             })
 
-
-        # ---------- 3. 质量保证金（质保金）比例检查 ----------
-    quality_found = False
+    # ---------- 3. 质量保证金比例检查（全文扫描，始终执行）----------
     if full_text:
-        # 优先匹配更具体的模式：工程质量保证金为...% 或 质量保证金为...%
         pattern = r'(?:工程质量保证金|质量保证金)\s*[为:：]?\s*(\d+(?:\.\d+)?)\s*%'
         match = re.search(pattern, full_text, re.IGNORECASE)
         if match:
-            quality_found = True
             percent = float(match.group(1))
-            # 提取上下文（前50后200字符）
             start = max(0, match.start() - 50)
             end = min(len(full_text), match.end() + 200)
             context = full_text[start:end].replace('\n', ' ')
@@ -1198,11 +1085,11 @@ def check_negative_list(front_info, table_dict):
                     "详情": f"质量保证金比例为 {percent}%，符合 ≤3% 的要求"
                 })
         else:
-            # 回退方案：查找包含“质保金”或“质量保证金”且同时有百分比的句子
             sentences = re.split(r'[。！；\n]+', full_text)
+            found = False
             for sentence in sentences:
                 if ('质保金' in sentence or '质量保证金' in sentence) and '%' in sentence:
-                    quality_found = True
+                    found = True
                     percent_match = re.search(r'(\d+(?:\.\d+)?)\s*%', sentence)
                     if percent_match:
                         percent = float(percent_match.group(1))
@@ -1227,14 +1114,14 @@ def check_negative_list(front_info, table_dict):
                             "原文": sentence[:200],
                             "详情": "未找到明确的百分比数值"
                         })
-                    break  # 只处理第一个匹配的句子
-        if not quality_found:
-            issues.append({
-                "规则": "质量保证金比例",
-                "通过": False,
-                "原文": "未找到",
-                "详情": "未找到质量保证金或质保金条款"
-            })
+                    break
+            if not found:
+                issues.append({
+                    "规则": "质量保证金比例",
+                    "通过": False,
+                    "原文": "未找到",
+                    "详情": "未找到质量保证金或质保金条款"
+                })
     else:
         issues.append({
             "规则": "质量保证金比例",
@@ -1242,21 +1129,31 @@ def check_negative_list(front_info, table_dict):
             "原文": "未获取到全文",
             "详情": "无法进行全文扫描，请重新上传文件"
         })
- 
-        # ---------- 4. 投标保证金比例/金额限制检查（需同时满足比例≤2%且金额≤80万）----------
+
+    # ---------- 4. 投标保证金比例/金额限制检查（全文扫描，始终执行）----------
     if full_text:
         sentences = re.split(r'[。！；\n]+', full_text)
         found = False
         for sentence in sentences:
             if '投标保证金' in sentence:
                 found = True
-                percent = None
-                amount = None
-                # 提取百分比
                 percent_match = re.search(r'(\d+(?:\.\d+)?)\s*%', sentence)
                 if percent_match:
                     percent = float(percent_match.group(1))
-                # 提取金额
+                    if percent > 2:
+                        issues.append({
+                            "规则": "投标保证金比例",
+                            "通过": False,
+                            "原文": sentence[:200],
+                            "详情": f"投标保证金比例 {percent}%，超过法定上限 2%"
+                        })
+                    else:
+                        issues.append({
+                            "规则": "投标保证金比例",
+                            "通过": True,
+                            "原文": sentence[:200],
+                            "详情": f"投标保证金比例 {percent}%，符合 ≤2% 的要求"
+                        })
                 amount_match = re.search(r'(\d+(?:\.\d+)?)\s*(万?元?|万元)', sentence)
                 if amount_match:
                     num = float(amount_match.group(1))
@@ -1265,43 +1162,28 @@ def check_negative_list(front_info, table_dict):
                         amount = num * 10000
                     else:
                         amount = num
-                # 判断违规
-                if percent is not None and percent > 2:
-                    issues.append({
-                        "规则": "投标保证金比例",
-                        "通过": False,
-                        "原文": sentence[:200],
-                        "详情": f"投标保证金比例 {percent}%，超过法定上限 2%"
-                    })
-                elif percent is not None:
-                    issues.append({
-                        "规则": "投标保证金比例",
-                        "通过": True,
-                        "原文": sentence[:200],
-                        "详情": f"投标保证金比例 {percent}%，符合 ≤2% 的要求"
-                    })
-                if amount is not None and amount > 800000:
-                    issues.append({
-                        "规则": "投标保证金金额",
-                        "通过": False,
-                        "原文": sentence[:200],
-                        "详情": f"投标保证金金额 {amount/10000:.0f}万元，超过法定上限 80万元"
-                    })
-                elif amount is not None:
-                    issues.append({
-                        "规则": "投标保证金金额",
-                        "通过": True,
-                        "原文": sentence[:200],
-                        "详情": f"投标保证金金额 {amount/10000:.0f}万元，符合 ≤80万元 的要求"
-                    })
-                if percent is None and amount is None:
+                    if amount > 800000:
+                        issues.append({
+                            "规则": "投标保证金金额",
+                            "通过": False,
+                            "原文": sentence[:200],
+                            "详情": f"投标保证金金额 {amount/10000:.0f}万元，超过法定上限 80万元"
+                        })
+                    else:
+                        issues.append({
+                            "规则": "投标保证金金额",
+                            "通过": True,
+                            "原文": sentence[:200],
+                            "详情": f"投标保证金金额 {amount/10000:.0f}万元，符合 ≤80万元 的要求"
+                        })
+                if percent_match is None and amount_match is None:
                     issues.append({
                         "规则": "投标保证金条款",
                         "通过": False,
                         "原文": sentence[:200],
                         "详情": "未找到明确的百分比或金额数字"
                     })
-                break  # 只检查第一个包含“投标保证金”的句子
+                break
         if not found:
             issues.append({
                 "规则": "投标保证金条款",
@@ -1316,6 +1198,57 @@ def check_negative_list(front_info, table_dict):
             "原文": "未获取到全文",
             "详情": "无法进行全文扫描，请重新上传文件"
         })
+
+    # ---------- 5. 评标方式（仅在未跳过表格时检查）----------
+    if not skip_table:
+        judge_key = None
+        for k in table_dict.keys():
+            if ('评委' in k or '评标' in k or '评审' in k or '委员会' in k) and ('人数' in k or '成员' in k or '组成' in k):
+                judge_key = k
+                break
+        if judge_key:
+            judge_text = table_dict[judge_key]
+            has_odd = re.search(r'单数|奇数', judge_text)
+            match = re.search(r'(\d+)', judge_text)
+            if match and has_odd:
+                num = int(match.group(1))
+                if num >= 5 and num % 2 == 1:
+                    issues.append({
+                        "规则": "评标方式",
+                        "通过": True,
+                        "原文": judge_text,
+                        "详情": f"评委人数为 {num} 人，符合5人及以上单数的要求"
+                    })
+                else:
+                    issues.append({
+                        "规则": "评标方式",
+                        "通过": False,
+                        "原文": judge_text,
+                        "详情": f"评委人数为 {num} 人，不符合5人及以上单数的要求"
+                    })
+            elif match and not has_odd:
+                issues.append({
+                    "规则": "评标方式",
+                    "通过": False,
+                    "原文": judge_text,
+                    "详情": "未明确写明“单数”或“奇数”"
+                })
+            else:
+                issues.append({
+                    "规则": "评标方式",
+                    "通过": False,
+                    "原文": judge_text,
+                    "详情": "未找到明确的人数数字"
+                })
+        else:
+            issues.append({
+                "规则": "评标方式",
+                "通过": False,
+                "原文": "未找到",
+                "详情": "须知表中未找到评标方式相关条款"
+            })
+    else:
+        pass  # 跳过评标方式检查
 
     return issues
 
@@ -1362,7 +1295,8 @@ if file_type == "询价文件":
         st.session_state.full_text = None
     if "negative_issues" not in st.session_state:
         st.session_state.negative_issues = None
-    
+    if "skip_table" not in st.session_state:
+        st.session_state.skip_table = False
 
     # 上传文件处理
     if uploaded_file is not None and st.session_state.last_file != uploaded_file.name:
@@ -1375,8 +1309,6 @@ if file_type == "询价文件":
             else:
                 front_text = full_text
             st.session_state.front_info = parse_front_info(front_text)
-            # 提取合同信息
-          
             # 清空之前的表格和检查结果
             st.session_state.table_dict = None
             st.session_state.results = None
@@ -1390,13 +1322,11 @@ if file_type == "询价文件":
             st.json(st.session_state.front_info)
 
     # 须知表获取
-        # 表格获取
     if uploaded_file is not None:
         st.subheader("📋 获取“分供商须知样表”内容")
         use_auto = st.radio("表格来源", ["手动粘贴", "自动提取（仅限原生表格）"], horizontal=True)
         
         if use_auto == "手动粘贴":
-            # 如果尚未解析或跳过表格，显示粘贴区域和按钮
             if st.session_state.table_dict is None:
                 manual_text = st.text_area(
                     "请将“分供商须知样表”的表格内容（包括表头及所有数据行）完整粘贴到下方",
@@ -1417,17 +1347,15 @@ if file_type == "询价文件":
                             st.warning("请先粘贴表格内容")
                 with col2:
                     if st.button("⏩ 跳过表格", key="skip_table"):
-                        st.session_state.table_dict = {}   # 空字典表示跳过
+                        st.session_state.table_dict = {}
                         st.success("已跳过须知表，将不进行依赖表格的检查")
             else:
-                # 已经解析或跳过，显示当前状态
                 if st.session_state.table_dict == {}:
                     st.info("已跳过须知表，未提供表格内容")
                 else:
                     with st.expander("📋 须知样表内容", expanded=False):
                         st.json(st.session_state.table_dict)
         else:  # 自动提取
-            # 如果尚未解析表格且未跳过，尝试自动提取
             if st.session_state.table_dict is None:
                 with st.spinner("尝试自动提取表格..."):
                     full_text = extract_contract_text(uploaded_file)
@@ -1454,48 +1382,51 @@ if file_type == "询价文件":
                                 st.success("自动提取成功")
                             else:
                                 st.error("自动提取失败，请切换为手动粘贴模式")
-                                st.session_state.table_dict = None  # 可让用户重新选择
+                                st.session_state.table_dict = None
                         else:
                             st.error("未找到表格数据，请切换为手动粘贴模式")
                             st.session_state.table_dict = None
                     else:
                         st.error("未找到“分供商须知样表”标题，请切换为手动粘贴模式")
                         st.session_state.table_dict = None
-                # 如果自动提取失败，可以给个提示并让用户手动粘贴，但用户已选择自动提取模式，可能需要重新选择
-                # 为了更好的体验，自动提取失败后可以显示一个手动粘贴区域作为备选
                 if st.session_state.table_dict is None:
                     st.warning("自动提取失败，您也可以手动粘贴表格内容：")
-                    manual_text_fallback = st.text_area("请粘贴表格", height=200)
+                    manual_fallback = st.text_area("请粘贴表格", height=200)
                     if st.button("手动解析", key="parse_fallback"):
-                        if manual_text_fallback.strip():
-                            table_dict = parse_table_from_text(manual_text_fallback)
+                        if manual_fallback.strip():
+                            table_dict = parse_table_from_text(manual_fallback)
                             if table_dict:
                                 st.session_state.table_dict = table_dict
                                 st.success("手动解析成功")
                             else:
                                 st.error("解析失败")
             else:
-                # 已经解析或跳过，显示当前状态
                 if st.session_state.table_dict == {}:
                     st.info("已跳过须知表，未提供表格内容")
                 else:
                     with st.expander("📋 须知样表内容", expanded=False):
                         st.json(st.session_state.table_dict)
 
-    
-
-        # 显示合同信息（默认折叠）
-    
     # 开始检查按钮
     if st.button("🚀 开始检查", type="primary"):
         if st.session_state.front_info:
-            # 负面清单检查（全文扫描，不依赖表格也可以）
-            st.session_state.negative_issues = check_negative_list(st.session_state.front_info, st.session_state.table_dict)
-            # 内容合理性检查（部分依赖表格，但函数内部会处理缺失）
-            issues = check_internal_rules(st.session_state.front_info, st.session_state.table_dict)
-            st.session_state.issues = issues
-            # 上下文一致性检查（公告 vs 须知表，如果表格为空则返回缺失）
-            st.session_state.results = compare_with_rules(st.session_state.front_info, st.session_state.table_dict)
+            skip_table = (st.session_state.table_dict == {})
+            st.session_state.skip_table = skip_table
+            
+            if skip_table:
+                st.warning("已跳过须知表，上下文一致性检查将不执行，其他检查照常进行。")
+                # 负面清单检查（内部已兼容空字典，会跳过履约担保和评标方式，但全文扫描继续）
+                st.session_state.negative_issues = check_negative_list(st.session_state.front_info, st.session_state.table_dict)
+                # 内容合理性检查（继续执行，依赖表格的规则会因缺失数据而显示“未找到”）
+                issues = check_internal_rules(st.session_state.front_info, st.session_state.table_dict)
+                st.session_state.issues = issues
+                # 上下文一致性检查跳过，清空结果
+                st.session_state.results = []
+            else:
+                st.session_state.negative_issues = check_negative_list(st.session_state.front_info, st.session_state.table_dict)
+                issues = check_internal_rules(st.session_state.front_info, st.session_state.table_dict)
+                st.session_state.issues = issues
+                st.session_state.results = compare_with_rules(st.session_state.front_info, st.session_state.table_dict)
 
     # 负面清单检查显示
     if st.session_state.get("negative_issues"):
@@ -1515,8 +1446,10 @@ if file_type == "询价文件":
                 else:
                     st.error(f"❌ **{issue['规则']}**：{issue['详情']}")
                 with st.expander("查看详情"):
-                    # 原文已包含 HTML 高亮标签，使用 markdown 渲染
                     st.markdown(f"**原文**：<br>{issue['原文']}", unsafe_allow_html=True)
+
+    # 内容合理性检查显示
+        # 内容合理性检查显示
     # 内容合理性检查显示
     if st.session_state.get("issues"):
         if "show_content" not in st.session_state:
@@ -1538,7 +1471,10 @@ if file_type == "询价文件":
                     st.write(f"**原文**：{issue['原文']}")
 
     # 上下文一致性检查显示
-    if st.session_state.get("results"):
+        # 上下文一致性检查显示
+    if st.session_state.get("skip_table"):
+        st.info("已跳过须知表，不进行上下文一致性检查")
+    elif st.session_state.get("results"):
         if "show_consistency" not in st.session_state:
             st.session_state.show_consistency = False
         col1, col2 = st.columns([0.1, 5])
