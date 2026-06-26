@@ -3424,6 +3424,7 @@ st.set_page_config(page_title="招标文件审查助手", layout="wide")
 st.title("招标文件审查助手")
 
 
+st.write("Secrets keys:", list(st.secrets.keys()))
 
 file_type = st.selectbox("请选择文件类型", ["", "询价文件", "响应文件"], index=0)
 
