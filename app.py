@@ -3657,16 +3657,16 @@ if file_type == "询价文件":
         if rule_name in order_list:
             return order_list.index(rule_name)
         return len(order_list)
-                GUARANTEE_ORDER = [
-                    "设立其他非法保证金",
-                    "无息退还投标保证金或退还时间不合规",
-                    "以不合理的理由没收投标保证金",
-                    "投标保证金比例",
-                    "投标保证金金额",
-                    "投标保证金条款",
-                    "质量保证金比例"
+    GUARANTEE_ORDER = [
+        "设立其他非法保证金",
+        "无息退还投标保证金或退还时间不合规",
+        "以不合理的理由没收投标保证金",
+        "投标保证金比例",
+        "投标保证金金额",
+        "投标保证金条款",
+        "质量保证金比例"
     ]
-    ]
+    guar_issues.sort(key=lambda x: sort_by_order(x, GUARANTEE_ORDER))
             # ---------- 资格限定折叠块 ----------
             if qual_issues:
                 with st.expander("📋 资格限定", expanded=False):
