@@ -3652,7 +3652,21 @@ if file_type == "询价文件":
                     workflow_issues.append(issue)
                 else:
                     other_issues.append(issue)
-            
+    def sort_by_order(issue, order_list):
+        rule_name = issue["规则"]
+        if rule_name in order_list:
+            return order_list.index(rule_name)
+        return len(order_list)
+                GUARANTEE_ORDER = [
+                    "设立其他非法保证金",
+                    "无息退还投标保证金或退还时间不合规",
+                    "以不合理的理由没收投标保证金",
+                    "投标保证金比例",
+                    "投标保证金金额",
+                    "投标保证金条款",
+                    "质量保证金比例"
+    ]
+    ]
             # ---------- 资格限定折叠块 ----------
             if qual_issues:
                 with st.expander("📋 资格限定", expanded=False):
