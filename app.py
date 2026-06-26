@@ -331,7 +331,7 @@ def is_numeric_equal(num_str1, num_str2):
 
 def ai_extract_in_area(text, field_name, field_description, area_name="", default="未找到"):
     zhipu_client = OpenAI(
-        api_key="ZHIPU_API_KEY_1",
+        api_key=st.secrets["ZHIPU_API_KEY_1"],
         base_url="https://open.bigmodel.cn/api/paas/v4/"
     )
 
@@ -435,7 +435,7 @@ def check_with_ollama(category, level, desc, max_price, project_scale):
 
     # 初始化客户端
     client = OpenAI(
-        api_key="ZHIPU_API_KEY_2",
+        api_key=st.secrets["ZHIPU_API_KEY_2"],
         base_url="https://open.bigmodel.cn/api/paas/v4/"
     )
 
@@ -1909,7 +1909,7 @@ def ai_rules_check(text, rules, is_secondary=False, snippet_text=""):
 ╠═══════════════════════════════════════════════════════════════
 """
     zhipu_client2 = OpenAI(
-        api_key="ZHIPU_API_KEY_3",
+        api_key=st.secrets["ZHIPU_API_KEY_3"],
         base_url="https://open.bigmodel.cn/api/paas/v4/",
         timeout=60.0    
     )
