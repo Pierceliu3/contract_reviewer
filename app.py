@@ -3082,10 +3082,14 @@ def check_negative_list(front_info, table_dict):
                 break
         if judge_key:
             judge_text = table_dict[judge_key]
-            has_odd = re.search(r'单数|奇数', judge_text)
-            match = re.search(r'(\d+)', judge_text)
-            if match and has_odd:
-                num = int(match.group(1))
+            
+            # 第一步：尝试提取具体人数
+            numbers = re.findall(r'(\d+)', judge_text)
+            valid_numbers = [int(n) for n in numbers if 5 <= int(n) <= 50]
+            
+            if valid_numbers:
+                # 有具体人数，直接判断
+                num = valid_numbers[0]  # 取第一个
                 if num >= 5 and num % 2 == 1:
                     issues.append({
                         "规则": "评标方式",
@@ -3098,22 +3102,26 @@ def check_negative_list(front_info, table_dict):
                         "规则": "评标方式",
                         "通过": False,
                         "原文": judge_text,
-                        "详情": f"评委人数为 {num} 人，不符合5人及以上单数的要求"
+                        "详情": f"评委人数为 {num} 人，{'小于5人' if num < 5 else '为偶数，不符合单数要求'}"
                     })
-            elif match and not has_odd:
-                issues.append({
-                    "规则": "评标方式",
-                    "通过": False,
-                    "原文": judge_text,
-                    "详情": "未明确写明“单数”或“奇数”"
-                })
             else:
-                issues.append({
-                    "规则": "评标方式",
-                    "通过": False,
-                    "原文": judge_text,
-                    "详情": "未找到明确的人数数字"
-                })
+                # 第二步：没有具体人数，检查是否有"单数"或"奇数"字样
+                has_odd = re.search(r'单数|奇数', judge_text)
+                if has_odd:
+                    # 有字样但没有数字，无法确认具体人数，视为不通过（因为可能是3人）
+                    issues.append({
+                        "规则": "评标方式",
+                        "通过": False,
+                        "原文": judge_text,
+                        "详情": "未明确写明具体人数，仅提及单数/奇数要求，无法确认是否达到5人及以上"
+                    })
+                else:
+                    issues.append({
+                        "规则": "评标方式",
+                        "通过": False,
+                        "原文": judge_text,
+                        "详情": "未明确写明评委人数或单数要求"
+                    })
         else:
             issues.append({
                 "规则": "评标方式",
