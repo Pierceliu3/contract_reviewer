@@ -13,9 +13,6 @@ import hmac
 
 
 
-ZHIPU_API_KEY_1 = st.secrets.get("ZHIPU_API_KEY_1")
-ZHIPU_API_KEY_2 = st.secrets.get("ZHIPU_API_KEY_2") 
-ZHIPU_API_KEY_3 = st.secrets.get("ZHIPU_API_KEY_3")
 
 # ============================================
 # 合规检查项列表（用于智能分析）
